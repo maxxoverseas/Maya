@@ -183,7 +183,6 @@
 //                 {booking && !booking.note && (
 //                   <span className="absolute bottom-0.5 w-1 h-1 bg-white rounded-full opacity-80" />
 //                 )}
-
 //               </button>
 //             );
 //           })}
@@ -304,8 +303,7 @@
 
 // export default Calendar;
 
-import React, { useState, useEffect, useCallback } from "react";
-
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   format,
   startOfMonth,
@@ -318,110 +316,85 @@ import {
   isToday,
 } from "date-fns";
 
-// YOUR GOOGLE APPS SCRIPT WEB APP URL
+// 👇 Apps Script "Web app" ka URL yahan paste karein (SETUP.md dekhein)
 const API_URL =
-  "https://script.google.com/macros/s/AKfycbyYeyXtkg0BxNVpYek7XkLyqe6IcPybRcj7lxhE-0UpZ8ahyyagZtpYTSV6vfxVAreU/exec";
+  "https://script.google.com/macros/s/AKfycby1EmrLVCL7wHXvI727y2nGtnT4Xq0OAacWrQgV6YNLF04vjgwSL7xgSE_fPUHg80d0/exec";
 
-// GOOGLE APPS SCRIPT JSONP CONNECTION
-function callCalendarAPI(params) {
-  return new Promise((resolve, reject) => {
-    const callback =
-      "__calendarCallback_" +
-      Date.now() +
-      "_" +
-      Math.random().toString(36).slice(2);
-
-    const script = document.createElement("script");
-
-    let timeout;
-
-    const cleanup = () => {
-      delete window[callback];
-      script.remove();
-      clearTimeout(timeout);
-    };
-
-    window[callback] = (data) => {
-      cleanup();
-
-      if (data && data.success !== false) {
-        resolve(data);
-      } else {
-        reject(new Error(data?.error || "Google Sheets API error"));
-      }
-    };
-
-    const query = new URLSearchParams({
-      ...params,
-      callback,
-    });
-
-    script.src = `${API_URL}?${query.toString()}`;
-
-    script.onerror = () => {
-      cleanup();
-      reject(new Error("Google Sheets connection failed."));
-    };
-
-    timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error("Request timed out. Please try again."));
-    }, 20000);
-
-    document.body.appendChild(script);
-  });
-}
+const CACHE_KEY = "my-calendar-cache-v2"; // sirf fast first-load ke liye, source of truth = Google Sheet
+const POLL_MS = 20000; // har 20 sec me dusre users ka data refresh
 
 const Calendar = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
-
   const [selectedDate, setSelectedDate] = useState(null);
-
   const [showModal, setShowModal] = useState(false);
 
-  // Shared bookings from Google Sheets
-  const [bookings, setBookings] = useState({});
-
-  // Modal draft
-  const [draftStatus, setDraftStatus] = useState("available");
-  const [draftNote, setDraftNote] = useState("");
-
-  // Loading and connection status
+  const [bookings, setBookings] = useState(() => {
+    try {
+      const saved = localStorage.getItem(CACHE_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [connectionError, setConnectionError] = useState("");
+  const [error, setError] = useState("");
+  const busyRef = useRef(false); // save ke dauran poll ko rok do
 
-  // Load all shared bookings
-  const refreshBookings = useCallback(async (showLoading = false) => {
-    if (showLoading) setLoading(true);
+  const [draftStatus, setDraftStatus] = useState(null);
+  const [draftNote, setDraftNote] = useState("");
 
+  // ---------- Google Sheet se load ----------
+  const loadFromSheet = useCallback(async () => {
+    if (busyRef.current) return;
     try {
-      const data = await callCalendarAPI({
-        action: "list",
-      });
-
-      setBookings(data.bookings || {});
-      setConnectionError("");
-    } catch (error) {
-      console.error("Calendar loading error:", error);
-      setConnectionError(error.message);
+      const res = await fetch(API_URL, { method: "GET" });
+      const data = await res.json();
+      setBookings(data);
+      setError("");
+      try {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+      } catch {}
+    } catch (e) {
+      setError("Server se data nahi aa raha. Internet / URL check karein.");
     } finally {
       setLoading(false);
     }
   }, []);
 
-  // Initial loading and automatic sync
   useEffect(() => {
-    refreshBookings(true);
+    loadFromSheet();
+    const id = setInterval(loadFromSheet, POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") loadFromSheet();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [loadFromSheet]);
 
-    const interval = setInterval(() => {
-      refreshBookings(false);
-    }, 10000);
+  // ---------- Google Sheet me write ----------
+  const postToSheet = async (payload) => {
+    // text/plain => CORS preflight nahi hota, Apps Script ke saath yehi sahi hai
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+    });
+    const out = await res.json();
+    if (!out.ok) throw new Error(out.error || "save failed");
+  };
 
-    return () => clearInterval(interval);
-  }, [refreshBookings]);
+  const getColorClass = (dateKey) => {
+    const b = bookings[dateKey];
+    if (!b || b.status === "available") return "bg-green-500 text-white";
+    if (b.status === "booked") return "bg-red-500 text-white";
+    if (b.status === "in_talks") return "bg-orange-500 text-white";
+    return "bg-green-500 text-white";
+  };
 
-  // Calendar days
   const days = eachDayOfInterval({
     start: startOfWeek(startOfMonth(currentDate)),
     end: endOfWeek(endOfMonth(currentDate)),
@@ -429,221 +402,157 @@ const Calendar = () => {
 
   const weekDays = ["S", "M", "T", "W", "T", "F", "S"];
 
-  // Status colors
-  const getColorClass = (dateKey) => {
-    const booking = bookings[dateKey];
-
-    if (!booking || booking.status === "available") {
-      return "bg-green-500 text-white";
-    }
-
-    if (booking.status === "booked") {
-      return "bg-red-500 text-white";
-    }
-
-    if (booking.status === "in_talks") {
-      return "bg-orange-500 text-white";
-    }
-
-    return "bg-green-500 text-white";
-  };
-
-  // Open modal
   const openModal = (day) => {
-    if (saving) return;
-
     const key = format(day, "yyyy-MM-dd");
     const existing = bookings[key];
-
     setSelectedDate(day);
-
-    setDraftStatus(existing?.status || "available");
+    setDraftStatus(existing?.status || null);
     setDraftNote(existing?.note || "");
-
     setShowModal(true);
   };
 
-  // Close modal
   const closeModal = () => {
-    if (saving) return;
-
     setShowModal(false);
     setSelectedDate(null);
-    setDraftStatus("available");
+    setDraftStatus(null);
     setDraftNote("");
   };
 
-  // Save to Google Sheets
   const handleSave = async () => {
-    if (!selectedDate || saving) return;
-
+    if (!selectedDate) return;
     const key = format(selectedDate, "yyyy-MM-dd");
+    const entry = {
+      status: draftStatus || "available",
+      note: draftNote.trim(),
+      savedAt: new Date().toISOString(),
+    };
+    const previous = bookings;
 
+    busyRef.current = true;
     setSaving(true);
-
+    setBookings((prev) => ({ ...prev, [key]: entry })); // turant UI update
+    closeModal();
     try {
-      await callCalendarAPI({
-        action: "save",
-        date: key,
-        status: draftStatus || "available",
-        note: draftNote.trim(),
-      });
-
-      // Update from server after successful save
-      await refreshBookings(false);
-
-      setShowModal(false);
-      setSelectedDate(null);
-      setDraftStatus("available");
-      setDraftNote("");
-    } catch (error) {
-      console.error("Save error:", error);
-      alert("Save failed: " + error.message);
+      await postToSheet({ action: "save", date: key, ...entry });
+      setError("");
+    } catch (e) {
+      setBookings(previous);
+      setError("Save nahi hua. Dobara try karein.");
     } finally {
+      busyRef.current = false;
       setSaving(false);
+      loadFromSheet();
     }
   };
 
-  // Remove from Google Sheets
   const handleRemove = async () => {
-    if (!selectedDate || saving) return;
-
-    const confirmed = window.confirm(
-      "Are you sure you want to remove this booking?"
-    );
-
-    if (!confirmed) return;
-
+    if (!selectedDate) return;
     const key = format(selectedDate, "yyyy-MM-dd");
+    const previous = bookings;
 
+    busyRef.current = true;
     setSaving(true);
-
+    setBookings((prev) => {
+      const copy = { ...prev };
+      delete copy[key];
+      return copy;
+    });
+    closeModal();
     try {
-      await callCalendarAPI({
-        action: "remove",
-        date: key,
-      });
-
-      await refreshBookings(false);
-
-      setShowModal(false);
-      setSelectedDate(null);
-      setDraftStatus("available");
-      setDraftNote("");
-    } catch (error) {
-      console.error("Remove error:", error);
-      alert("Remove failed: " + error.message);
+      await postToSheet({ action: "remove", date: key });
+      setError("");
+    } catch (e) {
+      setBookings(previous);
+      setError("Remove nahi hua. Dobara try karein.");
     } finally {
+      busyRef.current = false;
       setSaving(false);
+      loadFromSheet();
     }
   };
 
   const selectedKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
-
-  const hasExisting = selectedKey ? Boolean(bookings[selectedKey]) : false;
+  const hasExisting = selectedKey && bookings[selectedKey];
+  const count = Object.keys(bookings).length;
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-start justify-center p-2 sm:p-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-3 sm:p-4">
-        {/* HEADER */}
-
+        {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <button
-            onClick={() => setCurrentDate((prev) => subMonths(prev, 1))}
+            onClick={() => setCurrentDate(subMonths(currentDate, 1))}
             className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500 text-white text-lg active:scale-95"
           >
             ‹
           </button>
-
           <h2 className="text-base sm:text-lg font-bold text-gray-800">
             {format(currentDate, "MMMM yyyy")}
           </h2>
-
           <button
-            onClick={() => setCurrentDate((prev) => addMonths(prev, 1))}
+            onClick={() => setCurrentDate(addMonths(currentDate, 1))}
             className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500 text-white text-lg active:scale-95"
           >
             ›
           </button>
         </div>
 
-        {/* LEGEND */}
+        {/* Status bar */}
+        <div className="h-5 mb-1 text-center text-[11px]">
+          {loading && <span className="text-gray-400">Loading data...</span>}
+          {!loading && saving && (
+            <span className="text-blue-500">Saving to Google Sheet...</span>
+          )}
+          {!loading && !saving && error && (
+            <button
+              onClick={loadFromSheet}
+              className="text-red-500 underline"
+              title="Retry"
+            >
+              {error} (Retry)
+            </button>
+          )}
+        </div>
 
+        {/* Legend */}
         <div className="flex items-center justify-center gap-3 mb-2 text-[10px] text-gray-600">
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-            Booked
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Booked
           </span>
-
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
-            Talks
+            <span className="w-2.5 h-2.5 rounded-full bg-orange-500" /> Talks
           </span>
-
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-            Free
+            <span className="w-2.5 h-2.5 rounded-full bg-green-500" /> Free
           </span>
         </div>
 
-        {/* CONNECTION STATUS */}
-
-        {loading && (
-          <p className="text-center text-xs text-blue-500 mb-2">
-            Loading shared calendar...
-          </p>
-        )}
-
-        {!loading && connectionError && (
-          <div className="text-center text-xs text-red-500 mb-2">
-            Connection error: {connectionError}
-            <button
-              onClick={() => refreshBookings(true)}
-              className="ml-2 underline font-bold"
-            >
-              Retry
-            </button>
-          </div>
-        )}
-
-        {!loading && !connectionError && (
-          <p className="text-center text-[10px] text-green-600 mb-2">
-            ✓ Connected to shared calendar
-          </p>
-        )}
-
-        {/* WEEK HEADER */}
-
+        {/* Week header */}
         <div className="grid grid-cols-7 gap-1 mb-1">
-          {weekDays.map((day, index) => (
+          {weekDays.map((d, i) => (
             <div
-              key={index}
+              key={i}
               className="text-center text-[10px] font-bold text-gray-400"
             >
-              {day}
+              {d}
             </div>
           ))}
         </div>
 
-        {/* CALENDAR DAYS */}
-
+        {/* Days */}
         <div className="grid grid-cols-7 gap-1">
-          {days.map((day, index) => {
+          {days.map((day, i) => {
             const key = format(day, "yyyy-MM-dd");
-
             const inMonth = day.getMonth() === currentDate.getMonth();
-
             const today = isToday(day);
-
             const booking = bookings[key];
 
             return (
               <button
-                key={key}
+                key={i}
                 onClick={() => openModal(day)}
                 className={`
-                  relative aspect-square rounded-md
-                  flex flex-col items-center justify-center
+                  relative aspect-square rounded-md flex flex-col items-center justify-center
                   transition-all active:scale-95
                   ${inMonth ? getColorClass(key) : "bg-gray-50 text-gray-300"}
                   ${today ? "ring-2 ring-blue-600 ring-offset-1" : ""}
@@ -654,15 +563,11 @@ const Calendar = () => {
                   {format(day, "d")}
                 </span>
 
-                {/* SAVED NOTE PREVIEW */}
-
                 {booking?.note && (
                   <span className="text-[7px] sm:text-[8px] leading-tight px-0.5 mt-0.5 w-full truncate text-center opacity-90">
                     {booking.note}
                   </span>
                 )}
-
-                {/* SAVED STATUS DOT */}
 
                 {booking && !booking.note && (
                   <span className="absolute bottom-0.5 w-1 h-1 bg-white rounded-full opacity-80" />
@@ -672,26 +577,12 @@ const Calendar = () => {
           })}
         </div>
 
-        {/* TOTAL COUNT */}
-
         <p className="text-center text-[11px] text-gray-400 mt-3">
-          {Object.keys(bookings).length} saved entr
-          {Object.keys(bookings).length === 1 ? "y" : "ies"}
+          {count} saved entr{count === 1 ? "y" : "ies"}
         </p>
-
-        {/* MANUAL REFRESH */}
-
-        <button
-          onClick={() => refreshBookings(true)}
-          disabled={loading || saving}
-          className="w-full mt-2 text-[11px] text-blue-600 font-semibold py-2 disabled:opacity-50"
-        >
-          ↻ Refresh Shared Calendar
-        </button>
       </div>
 
       {/* MODAL */}
-
       {showModal && selectedDate && (
         <div
           className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
@@ -699,33 +590,25 @@ const Calendar = () => {
         >
           <div
             className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-4 max-h-[90vh] overflow-y-auto animate-slideUp"
-            onClick={(event) => event.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
           >
-            {/* MODAL HEADER */}
-
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold text-gray-800">
                 {format(selectedDate, "EEE, dd MMM yyyy")}
               </h3>
-
               <button
                 onClick={closeModal}
-                disabled={saving}
                 className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 text-lg"
               >
                 ×
               </button>
             </div>
 
-            {/* STATUS */}
-
             <p className="text-[11px] font-semibold text-gray-500 mb-1">
               STATUS
             </p>
-
             <div className="grid grid-cols-3 gap-2 mb-3">
               <button
-                disabled={saving}
                 onClick={() => setDraftStatus("booked")}
                 className={`py-2 rounded-lg text-[11px] font-bold transition-all ${
                   draftStatus === "booked"
@@ -735,9 +618,7 @@ const Calendar = () => {
               >
                 🔴 Booked
               </button>
-
               <button
-                disabled={saving}
                 onClick={() => setDraftStatus("in_talks")}
                 className={`py-2 rounded-lg text-[11px] font-bold transition-all ${
                   draftStatus === "in_talks"
@@ -747,9 +628,7 @@ const Calendar = () => {
               >
                 🟠 Talks
               </button>
-
               <button
-                disabled={saving}
                 onClick={() => setDraftStatus("available")}
                 className={`py-2 rounded-lg text-[11px] font-bold transition-all ${
                   draftStatus === "available"
@@ -761,36 +640,26 @@ const Calendar = () => {
               </button>
             </div>
 
-            {/* NOTE */}
-
             <p className="text-[11px] font-semibold text-gray-500 mb-1">NOTE</p>
-
             <textarea
               value={draftNote}
-              onChange={(event) => setDraftNote(event.target.value)}
+              onChange={(e) => setDraftNote(e.target.value)}
               placeholder="Write note..."
               rows={3}
-              maxLength={5000}
-              disabled={saving}
               className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none mb-3"
             />
-
-            {/* ACTION BUTTONS */}
 
             <div className="flex gap-2">
               <button
                 onClick={handleSave}
-                disabled={saving}
-                className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg active:scale-95 disabled:opacity-50"
+                className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg active:scale-95"
               >
-                {saving ? "Saving..." : "💾 Save"}
+                💾 Save
               </button>
-
               {hasExisting && (
                 <button
                   onClick={handleRemove}
-                  disabled={saving}
-                  className="py-2.5 px-4 bg-red-100 text-red-600 text-sm font-bold rounded-lg active:scale-95 disabled:opacity-50"
+                  className="py-2.5 px-4 bg-red-100 text-red-600 text-sm font-bold rounded-lg active:scale-95"
                 >
                   🗑 Remove
                 </button>
@@ -798,29 +667,18 @@ const Calendar = () => {
             </div>
 
             <p className="text-[10px] text-gray-400 text-center mt-2">
-              Data is saved in Google Sheets and shared with all users.
+              Data Google Sheet me save hota hai, sab devices par dikhega.
             </p>
           </div>
         </div>
       )}
 
-      {/* ANIMATION */}
-
       <style>{`
         @keyframes slideUp {
-          from {
-            transform: translateY(40px);
-            opacity: 0;
-          }
-          to {
-            transform: translateY(0);
-            opacity: 1;
-          }
+          from { transform: translateY(40px); opacity: 0; }
+          to { transform: translateY(0); opacity: 1; }
         }
-
-        .animate-slideUp {
-          animation: slideUp 0.25s ease-out;
-        }
+        .animate-slideUp { animation: slideUp 0.25s ease-out; }
       `}</style>
     </div>
   );
