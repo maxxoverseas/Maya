@@ -1,11 +1,9 @@
-// // Calendar.jsx
-// import React, { useState } from "react";
+// import React, { useState, useEffect } from "react";
 // import {
 //   format,
 //   startOfMonth,
 //   endOfMonth,
 //   eachDayOfInterval,
-//   isSameDay,
 //   addMonths,
 //   subMonths,
 //   startOfWeek,
@@ -13,362 +11,301 @@
 //   isToday,
 // } from "date-fns";
 
+// const STORAGE_KEY = "my-calendar-data-v1";
+
 // const Calendar = () => {
 //   const [currentDate, setCurrentDate] = useState(new Date());
 //   const [selectedDate, setSelectedDate] = useState(null);
 //   const [showModal, setShowModal] = useState(false);
-//   const [note, setNote] = useState("");
 
-//   // Status types with colors
-//   const STATUS = {
-//     BOOKED: "booked", // Red
-//     PENDING: "pending", // Green (khali)
-//     IN_TALKS: "in_talks", // Orange (baat chalu)
-//   };
-
-//   // Sample data - aap ise API se ya localStorage se la sakte hain
-//   const [bookings, setBookings] = useState({
-//     // Format: 'yyyy-MM-dd': { status: 'booked' | 'pending' | 'in_talks', note: 'text' }
-//     [format(new Date(), "yyyy-MM-dd")]: {
-//       status: "booked",
-//       note: "Client meeting",
-//     },
+//   // ✅ PERSISTENT DATA - localStorage se load + auto save
+//   const [bookings, setBookings] = useState(() => {
+//     try {
+//       const saved = localStorage.getItem(STORAGE_KEY);
+//       return saved ? JSON.parse(saved) : {};
+//     } catch {
+//       return {};
+//     }
 //   });
 
-//   // Get color based on status
-//   const getStatusColor = (dateKey) => {
-//     const booking = bookings[dateKey];
+//   // Draft inputs for modal (only saved on Save click)
+//   const [draftStatus, setDraftStatus] = useState(null);
+//   const [draftNote, setDraftNote] = useState("");
 
-//     if (!booking) return "bg-green-500 hover:bg-green-600"; // Khali date = Green
-//     if (booking.status === "booked") return "bg-red-500 hover:bg-red-600"; // Booked = Red
-//     if (booking.status === "in_talks")
-//       return "bg-orange-500 hover:bg-orange-600"; // Talks = Orange
-//     if (booking.status === "pending") return "bg-green-500 hover:bg-green-600"; // Pending = Green
+//   // ✅ Auto-save to localStorage whenever bookings change
+//   useEffect(() => {
+//     localStorage.setItem(STORAGE_KEY, JSON.stringify(bookings));
+//   }, [bookings]);
 
-//     return "bg-green-500 hover:bg-green-600";
+//   // Status → color
+//   const getColorClass = (dateKey) => {
+//     const b = bookings[dateKey];
+//     if (!b || b.status === "available") return "bg-green-500 text-white";
+//     if (b.status === "booked") return "bg-red-500 text-white";
+//     if (b.status === "in_talks") return "bg-orange-500 text-white";
+//     return "bg-green-500 text-white";
 //   };
 
-//   // Get calendar days
-//   const getCalendarDays = () => {
-//     const monthStart = startOfMonth(currentDate);
-//     const monthEnd = endOfMonth(currentDate);
-//     const startDate = startOfWeek(monthStart);
-//     const endDate = endOfWeek(monthEnd);
+//   // Calendar days grid
+//   const days = eachDayOfInterval({
+//     start: startOfWeek(startOfMonth(currentDate)),
+//     end: endOfWeek(endOfMonth(currentDate)),
+//   });
 
-//     return eachDayOfInterval({ start: startDate, end: endDate });
-//   };
+//   const weekDays = ["S", "M", "T", "W", "T", "F", "S"];
 
-//   // Handle date click
-//   const handleDateClick = (date) => {
-//     setSelectedDate(date);
-//     const dateKey = format(date, "yyyy-MM-dd");
-//     const existing = bookings[dateKey];
-//     setNote(existing?.note || "");
+//   // Open modal
+//   const openModal = (day) => {
+//     const key = format(day, "yyyy-MM-dd");
+//     const existing = bookings[key];
+//     setSelectedDate(day);
+//     setDraftStatus(existing?.status || null);
+//     setDraftNote(existing?.note || "");
 //     setShowModal(true);
 //   };
 
-//   // Update booking status
-//   const updateStatus = (status) => {
-//     if (!selectedDate) return;
-//     const dateKey = format(selectedDate, "yyyy-MM-dd");
-
-//     setBookings((prev) => ({
-//       ...prev,
-//       [dateKey]: {
-//         status,
-//         note: note || "",
-//       },
-//     }));
-//   };
-
-//   // Save note
-//   const saveNote = () => {
-//     if (!selectedDate) return;
-//     const dateKey = format(selectedDate, "yyyy-MM-dd");
-
-//     setBookings((prev) => ({
-//       ...prev,
-//       [dateKey]: {
-//         status: prev[dateKey]?.status || "in_talks",
-//         note: note,
-//       },
-//     }));
-//   };
-
-//   // Clear booking
-//   const clearBooking = () => {
-//     if (!selectedDate) return;
-//     const dateKey = format(selectedDate, "yyyy-MM-dd");
-
-//     setBookings((prev) => {
-//       const updated = { ...prev };
-//       delete updated[dateKey];
-//       return updated;
-//     });
-//   };
-
-//   // Close modal
 //   const closeModal = () => {
 //     setShowModal(false);
 //     setSelectedDate(null);
-//     setNote("");
+//     setDraftStatus(null);
+//     setDraftNote("");
 //   };
 
-//   // Get current status of selected date
-//   const getCurrentStatus = () => {
-//     if (!selectedDate) return null;
-//     const dateKey = format(selectedDate, "yyyy-MM-dd");
-//     return bookings[dateKey];
+//   // ✅ SAVE — data stays forever until user removes
+//   const handleSave = () => {
+//     if (!selectedDate) return;
+//     const key = format(selectedDate, "yyyy-MM-dd");
+//     setBookings((prev) => ({
+//       ...prev,
+//       [key]: {
+//         status: draftStatus || "available",
+//         note: draftNote.trim(),
+//         savedAt: new Date().toISOString(),
+//       },
+//     }));
+//     closeModal();
 //   };
 
-//   const days = getCalendarDays();
-//   const weekDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+//   // ✅ REMOVE — only here data gets deleted
+//   const handleRemove = () => {
+//     if (!selectedDate) return;
+//     const key = format(selectedDate, "yyyy-MM-dd");
+//     setBookings((prev) => {
+//       const copy = { ...prev };
+//       delete copy[key];
+//       return copy;
+//     });
+//     closeModal();
+//   };
+
+//   const selectedKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
+//   const hasExisting = selectedKey && bookings[selectedKey];
 
 //   return (
-//     <div className="min-h-screen bg-gray-100 p-4 md:p-8">
-//       <div className="max-w-4xl mx-auto">
+//     <div className="min-h-screen bg-gray-100 flex items-start justify-center p-2 sm:p-4">
+//       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-3 sm:p-4">
 //         {/* Header */}
-//         <div className="bg-white rounded-t-xl shadow-lg p-4 md:p-6">
-//           <h1 className="text-2xl md:text-3xl font-bold text-gray-800 text-center mb-4">
-//             📅 Booking Calendar
-//           </h1>
-
-//           {/* Legend */}
-//           <div className="flex flex-wrap justify-center gap-4 mb-4">
-//             <div className="flex items-center gap-2">
-//               <div className="w-4 h-4 rounded bg-red-500"></div>
-//               <span className="text-sm text-gray-600">Booked</span>
-//             </div>
-//             <div className="flex items-center gap-2">
-//               <div className="w-4 h-4 rounded bg-orange-500"></div>
-//               <span className="text-sm text-gray-600">In Talks (Notes)</span>
-//             </div>
-//             <div className="flex items-center gap-2">
-//               <div className="w-4 h-4 rounded bg-green-500"></div>
-//               <span className="text-sm text-gray-600">Available (Khali)</span>
-//             </div>
-//           </div>
+//         <div className="flex items-center justify-between mb-3">
+//           <button
+//             onClick={() => setCurrentDate(subMonths(currentDate, 1))}
+//             className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500 text-white text-lg active:scale-95"
+//           >
+//             ‹
+//           </button>
+//           <h2 className="text-base sm:text-lg font-bold text-gray-800">
+//             {format(currentDate, "MMMM yyyy")}
+//           </h2>
+//           <button
+//             onClick={() => setCurrentDate(addMonths(currentDate, 1))}
+//             className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500 text-white text-lg active:scale-95"
+//           >
+//             ›
+//           </button>
 //         </div>
 
-//         {/* Calendar */}
-//         <div className="bg-white rounded-b-xl shadow-lg p-4 md:p-6">
-//           {/* Month Navigation */}
-//           <div className="flex items-center justify-between mb-6">
-//             <button
-//               onClick={() => setCurrentDate(subMonths(currentDate, 1))}
-//               className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+//         {/* Legend */}
+//         <div className="flex items-center justify-center gap-3 mb-2 text-[10px] text-gray-600">
+//           <span className="flex items-center gap-1">
+//             <span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Booked
+//           </span>
+//           <span className="flex items-center gap-1">
+//             <span className="w-2.5 h-2.5 rounded-full bg-orange-500" /> Talks
+//           </span>
+//           <span className="flex items-center gap-1">
+//             <span className="w-2.5 h-2.5 rounded-full bg-green-500" /> Free
+//           </span>
+//         </div>
+
+//         {/* Week header */}
+//         <div className="grid grid-cols-7 gap-1 mb-1">
+//           {weekDays.map((d, i) => (
+//             <div
+//               key={i}
+//               className="text-center text-[10px] font-bold text-gray-400"
 //             >
-//               ← Prev
-//             </button>
+//               {d}
+//             </div>
+//           ))}
+//         </div>
 
-//             <h2 className="text-xl md:text-2xl font-semibold text-gray-800">
-//               {format(currentDate, "MMMM yyyy")}
-//             </h2>
+//         {/* Days */}
+//         <div className="grid grid-cols-7 gap-1">
+//           {days.map((day, i) => {
+//             const key = format(day, "yyyy-MM-dd");
+//             const inMonth = day.getMonth() === currentDate.getMonth();
+//             const today = isToday(day);
+//             const booking = bookings[key];
 
-//             <button
-//               onClick={() => setCurrentDate(addMonths(currentDate, 1))}
-//               className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-//             >
-//               Next →
-//             </button>
-//           </div>
-
-//           {/* Week Days Header */}
-//           <div className="grid grid-cols-7 gap-1 md:gap-2 mb-2">
-//             {weekDays.map((day) => (
-//               <div
-//                 key={day}
-//                 className="text-center text-xs md:text-sm font-semibold text-gray-500 py-2"
+//             return (
+//               <button
+//                 key={i}
+//                 onClick={() => openModal(day)}
+//                 className={`
+//                   relative aspect-square rounded-md flex flex-col items-center justify-center
+//                   transition-all active:scale-95
+//                   ${inMonth ? getColorClass(key) : "bg-gray-50 text-gray-300"}
+//                   ${today ? "ring-2 ring-blue-600 ring-offset-1" : ""}
+//                   overflow-hidden
+//                 `}
 //               >
-//                 {day}
-//               </div>
-//             ))}
-//           </div>
+//                 <span className="text-[11px] sm:text-sm font-semibold leading-none">
+//                   {format(day, "d")}
+//                 </span>
 
-//           {/* Calendar Days */}
-//           <div className="grid grid-cols-7 gap-1 md:gap-2">
-//             {days.map((day, idx) => {
-//               const dateKey = format(day, "yyyy-MM-dd");
-//               const isCurrentMonth = day.getMonth() === currentDate.getMonth();
-//               const isTodayDate = isToday(day);
-//               const booking = bookings[dateKey];
+//                 {/* ✅ Saved note preview on cell */}
+//                 {booking?.note && (
+//                   <span className="text-[7px] sm:text-[8px] leading-tight px-0.5 mt-0.5 w-full truncate text-center opacity-90">
+//                     {booking.note}
+//                   </span>
+//                 )}
 
-//               return (
-//                 <button
-//                   key={idx}
-//                   onClick={() => handleDateClick(day)}
-//                   className={`
-//                     relative aspect-square rounded-lg p-1 md:p-2 transition-all duration-200
-//                     ${getStatusColor(dateKey)}
-//                     ${!isCurrentMonth ? "opacity-40" : ""}
-//                     ${isTodayDate ? "ring-2 ring-blue-500 ring-offset-1" : ""}
-//                     text-white font-semibold
-//                     hover:scale-105 transform
-//                     shadow-sm
-//                     flex flex-col items-center justify-center
-//                   `}
-//                 >
-//                   <span className="text-sm md:text-lg">{format(day, "d")}</span>
+//                 {/* dot indicator for saved status */}
+//                 {booking && !booking.note && (
+//                   <span className="absolute bottom-0.5 w-1 h-1 bg-white rounded-full opacity-80" />
+//                 )}
 
-//                   {/* Note indicator */}
-//                   {booking?.note && (
-//                     <span className="absolute top-1 right-1 w-2 h-2 bg-white rounded-full"></span>
-//                   )}
-
-//                   {/* Status label (desktop) */}
-//                   {booking && (
-//                     <span className="hidden md:block text-[10px] mt-1 opacity-90 truncate w-full text-center">
-//                       {booking.status === "booked"
-//                         ? "Booked"
-//                         : booking.status === "in_talks"
-//                         ? "Talks"
-//                         : "Free"}
-//                     </span>
-//                   )}
-//                 </button>
-//               );
-//             })}
-//           </div>
+//               </button>
+//             );
+//           })}
 //         </div>
+
+//         {/* Total count */}
+//         <p className="text-center text-[11px] text-gray-400 mt-3">
+//           {Object.keys(bookings).length} saved entr
+//           {Object.keys(bookings).length === 1 ? "y" : "ies"}
+//         </p>
 //       </div>
 
-//       {/* MODAL - Click par options open */}
+//       {/* ✅ MODAL */}
 //       {showModal && selectedDate && (
 //         <div
-//           className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+//           className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
 //           onClick={closeModal}
 //         >
 //           <div
-//             className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 animate-fadeIn"
+//             className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-4 max-h-[90vh] overflow-y-auto animate-slideUp"
 //             onClick={(e) => e.stopPropagation()}
 //           >
-//             {/* Modal Header */}
-//             <div className="flex items-center justify-between mb-4">
-//               <h3 className="text-xl font-bold text-gray-800">
-//                 {format(selectedDate, "EEEE, dd MMMM yyyy")}
+//             {/* Header */}
+//             <div className="flex items-center justify-between mb-3">
+//               <h3 className="text-sm font-bold text-gray-800">
+//                 {format(selectedDate, "EEE, dd MMM yyyy")}
 //               </h3>
 //               <button
 //                 onClick={closeModal}
-//                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+//                 className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 text-lg"
 //               >
 //                 ×
 //               </button>
 //             </div>
 
-//             {/* Current Status */}
-//             {getCurrentStatus() && (
-//               <div className="mb-4 p-3 rounded-lg bg-gray-50">
-//                 <span className="text-sm text-gray-600">Current status: </span>
-//                 <span
-//                   className={`font-semibold capitalize ${
-//                     getCurrentStatus().status === "booked"
-//                       ? "text-red-500"
-//                       : getCurrentStatus().status === "in_talks"
-//                       ? "text-orange-500"
-//                       : "text-green-500"
-//                   }`}
-//                 >
-//                   {getCurrentStatus().status === "in_talks"
-//                     ? "In Talks"
-//                     : getCurrentStatus().status}
-//                 </span>
-//               </div>
-//             )}
-
-//             {/* Options */}
-//             <div className="space-y-3 mb-4">
-//               <p className="text-sm font-semibold text-gray-700">
-//                 Select Status:
-//               </p>
-
+//             {/* Status buttons */}
+//             <p className="text-[11px] font-semibold text-gray-500 mb-1">
+//               STATUS
+//             </p>
+//             <div className="grid grid-cols-3 gap-2 mb-3">
 //               <button
-//                 onClick={() => updateStatus("booked")}
-//                 className={`w-full py-3 rounded-lg font-semibold text-white transition-all
-//                   ${
-//                     getCurrentStatus()?.status === "booked"
-//                       ? "bg-red-600 ring-2 ring-red-300"
-//                       : "bg-red-500 hover:bg-red-600"
-//                   }`}
+//                 onClick={() => setDraftStatus("booked")}
+//                 className={`py-2 rounded-lg text-[11px] font-bold transition-all ${
+//                   draftStatus === "booked"
+//                     ? "bg-red-500 text-white ring-2 ring-red-300"
+//                     : "bg-red-50 text-red-600"
+//                 }`}
 //               >
 //                 🔴 Booked
 //               </button>
-
 //               <button
-//                 onClick={() => updateStatus("in_talks")}
-//                 className={`w-full py-3 rounded-lg font-semibold text-white transition-all
-//                   ${
-//                     getCurrentStatus()?.status === "in_talks"
-//                       ? "bg-orange-600 ring-2 ring-orange-300"
-//                       : "bg-orange-500 hover:bg-orange-600"
-//                   }`}
+//                 onClick={() => setDraftStatus("in_talks")}
+//                 className={`py-2 rounded-lg text-[11px] font-bold transition-all ${
+//                   draftStatus === "in_talks"
+//                     ? "bg-orange-500 text-white ring-2 ring-orange-300"
+//                     : "bg-orange-50 text-orange-600"
+//                 }`}
 //               >
-
-//                 🟠 In Talks (Baat Chalu)
+//                 🟠 Talks
 //               </button>
-
 //               <button
-//                 onClick={() => updateStatus("pending")}
-//                 className={`w-full py-3 rounded-lg font-semibold text-white transition-all
-//                   ${
-//                     getCurrentStatus()?.status === "pending"
-//                       ? "bg-green-600 ring-2 ring-green-300"
-//                       : "bg-green-500 hover:bg-green-600"
-//                   }`}
+//                 onClick={() => setDraftStatus("available")}
+//                 className={`py-2 rounded-lg text-[11px] font-bold transition-all ${
+//                   draftStatus === "available"
+//                     ? "bg-green-500 text-white ring-2 ring-green-300"
+//                     : "bg-green-50 text-green-600"
+//                 }`}
 //               >
-//                 🟢 Available / Khali
+//                 🟢 Free
 //               </button>
 //             </div>
 
-//             {/* Notes */}
-//             <div className="mb-4">
-//               <label className="block text-sm font-semibold text-gray-700 mb-2">
-//                 📝 Notes (feed)
-//               </label>
-//               <textarea
-//                 value={note}
-//                 onChange={(e) => setNote(e.target.value)}
-//                 placeholder="Yahan note likhein..."
-//                 className="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
-//                 rows={3}
-//               />
+//             {/* Note input */}
+//             <p className="text-[11px] font-semibold text-gray-500 mb-1">NOTE</p>
+//             <textarea
+//               value={draftNote}
+//               onChange={(e) => setDraftNote(e.target.value)}
+//               placeholder="Write note..."
+//               rows={3}
+//               className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none mb-3"
+//             />
+
+//             {/* Action buttons */}
+//             <div className="flex gap-2">
 //               <button
-//                 onClick={saveNote}
-//                 className="mt-2 w-full py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-semibold"
+//                 onClick={handleSave}
+//                 className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg active:scale-95"
 //               >
-//                 Save Note
+//                 💾 Save
 //               </button>
+//               {hasExisting && (
+//                 <button
+//                   onClick={handleRemove}
+//                   className="py-2.5 px-4 bg-red-100 text-red-600 text-sm font-bold rounded-lg active:scale-95"
+//                 >
+//                   🗑 Remove
+//                 </button>
+//               )}
 //             </div>
 
-//             {/* Clear / Delete */}
-//             <button
-//               onClick={() => {
-//                 clearBooking();
-//                 closeModal();
-//               }}
-//               className="w-full py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-semibold"
-//             >
-//               🗑️ Clear / Reset
-//             </button>
+//             <p className="text-[10px] text-gray-400 text-center mt-2">
+//               Data saved permanently. Remove only when you click Remove.
+//             </p>
 //           </div>
 //         </div>
 //       )}
 
-//       {/* Inline styles for animation */}
 //       <style>{`
-//         @keyframes fadeIn {
-//           from { opacity: 0; transform: scale(0.95); }
-//           to { opacity: 1; transform: scale(1); }
+//         @keyframes slideUp {
+//           from { transform: translateY(40px); opacity: 0; }
+//           to { transform: translateY(0); opacity: 1; }
 //         }
-//         .animate-fadeIn {
-//           animation: fadeIn 0.2s ease-out;
-//         }
+//         .animate-slideUp { animation: slideUp 0.25s ease-out; }
 //       `}</style>
 //     </div>
 //   );
 // };
 
 // export default Calendar;
-import React, { useState, useEffect } from "react";
+
+import React, { useState, useEffect, useCallback } from "react";
+
 import {
   format,
   startOfMonth,
@@ -381,42 +318,110 @@ import {
   isToday,
 } from "date-fns";
 
-const STORAGE_KEY = "my-calendar-data-v1";
+// YOUR GOOGLE APPS SCRIPT WEB APP URL
+const API_URL =
+  "https://script.google.com/macros/s/AKfycbyYeyXtkg0BxNVpYek7XkLyqe6IcPybRcj7lxhE-0UpZ8ahyyagZtpYTSV6vfxVAreU/exec";
+
+// GOOGLE APPS SCRIPT JSONP CONNECTION
+function callCalendarAPI(params) {
+  return new Promise((resolve, reject) => {
+    const callback =
+      "__calendarCallback_" +
+      Date.now() +
+      "_" +
+      Math.random().toString(36).slice(2);
+
+    const script = document.createElement("script");
+
+    let timeout;
+
+    const cleanup = () => {
+      delete window[callback];
+      script.remove();
+      clearTimeout(timeout);
+    };
+
+    window[callback] = (data) => {
+      cleanup();
+
+      if (data && data.success !== false) {
+        resolve(data);
+      } else {
+        reject(new Error(data?.error || "Google Sheets API error"));
+      }
+    };
+
+    const query = new URLSearchParams({
+      ...params,
+      callback,
+    });
+
+    script.src = `${API_URL}?${query.toString()}`;
+
+    script.onerror = () => {
+      cleanup();
+      reject(new Error("Google Sheets connection failed."));
+    };
+
+    timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("Request timed out. Please try again."));
+    }, 20000);
+
+    document.body.appendChild(script);
+  });
+}
 
 const Calendar = () => {
   const [currentDate, setCurrentDate] = useState(new Date());
+
   const [selectedDate, setSelectedDate] = useState(null);
+
   const [showModal, setShowModal] = useState(false);
 
-  // ✅ PERSISTENT DATA - localStorage se load + auto save
-  const [bookings, setBookings] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      return saved ? JSON.parse(saved) : {};
-    } catch {
-      return {};
-    }
-  });
+  // Shared bookings from Google Sheets
+  const [bookings, setBookings] = useState({});
 
-  // Draft inputs for modal (only saved on Save click)
-  const [draftStatus, setDraftStatus] = useState(null);
+  // Modal draft
+  const [draftStatus, setDraftStatus] = useState("available");
   const [draftNote, setDraftNote] = useState("");
 
-  // ✅ Auto-save to localStorage whenever bookings change
+  // Loading and connection status
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [connectionError, setConnectionError] = useState("");
+
+  // Load all shared bookings
+  const refreshBookings = useCallback(async (showLoading = false) => {
+    if (showLoading) setLoading(true);
+
+    try {
+      const data = await callCalendarAPI({
+        action: "list",
+      });
+
+      setBookings(data.bookings || {});
+      setConnectionError("");
+    } catch (error) {
+      console.error("Calendar loading error:", error);
+      setConnectionError(error.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // Initial loading and automatic sync
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(bookings));
-  }, [bookings]);
+    refreshBookings(true);
 
-  // Status → color
-  const getColorClass = (dateKey) => {
-    const b = bookings[dateKey];
-    if (!b || b.status === "available") return "bg-green-500 text-white";
-    if (b.status === "booked") return "bg-red-500 text-white";
-    if (b.status === "in_talks") return "bg-orange-500 text-white";
-    return "bg-green-500 text-white";
-  };
+    const interval = setInterval(() => {
+      refreshBookings(false);
+    }, 10000);
 
-  // Calendar days grid
+    return () => clearInterval(interval);
+  }, [refreshBookings]);
+
+  // Calendar days
   const days = eachDayOfInterval({
     start: startOfWeek(startOfMonth(currentDate)),
     end: endOfWeek(endOfMonth(currentDate)),
@@ -424,114 +429,221 @@ const Calendar = () => {
 
   const weekDays = ["S", "M", "T", "W", "T", "F", "S"];
 
+  // Status colors
+  const getColorClass = (dateKey) => {
+    const booking = bookings[dateKey];
+
+    if (!booking || booking.status === "available") {
+      return "bg-green-500 text-white";
+    }
+
+    if (booking.status === "booked") {
+      return "bg-red-500 text-white";
+    }
+
+    if (booking.status === "in_talks") {
+      return "bg-orange-500 text-white";
+    }
+
+    return "bg-green-500 text-white";
+  };
+
   // Open modal
   const openModal = (day) => {
+    if (saving) return;
+
     const key = format(day, "yyyy-MM-dd");
     const existing = bookings[key];
+
     setSelectedDate(day);
-    setDraftStatus(existing?.status || null);
+
+    setDraftStatus(existing?.status || "available");
     setDraftNote(existing?.note || "");
+
     setShowModal(true);
   };
 
+  // Close modal
   const closeModal = () => {
+    if (saving) return;
+
     setShowModal(false);
     setSelectedDate(null);
-    setDraftStatus(null);
+    setDraftStatus("available");
     setDraftNote("");
   };
 
-  // ✅ SAVE — data stays forever until user removes
-  const handleSave = () => {
-    if (!selectedDate) return;
+  // Save to Google Sheets
+  const handleSave = async () => {
+    if (!selectedDate || saving) return;
+
     const key = format(selectedDate, "yyyy-MM-dd");
-    setBookings((prev) => ({
-      ...prev,
-      [key]: {
+
+    setSaving(true);
+
+    try {
+      await callCalendarAPI({
+        action: "save",
+        date: key,
         status: draftStatus || "available",
         note: draftNote.trim(),
-        savedAt: new Date().toISOString(),
-      },
-    }));
-    closeModal();
+      });
+
+      // Update from server after successful save
+      await refreshBookings(false);
+
+      setShowModal(false);
+      setSelectedDate(null);
+      setDraftStatus("available");
+      setDraftNote("");
+    } catch (error) {
+      console.error("Save error:", error);
+      alert("Save failed: " + error.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
-  // ✅ REMOVE — only here data gets deleted
-  const handleRemove = () => {
-    if (!selectedDate) return;
+  // Remove from Google Sheets
+  const handleRemove = async () => {
+    if (!selectedDate || saving) return;
+
+    const confirmed = window.confirm(
+      "Are you sure you want to remove this booking?"
+    );
+
+    if (!confirmed) return;
+
     const key = format(selectedDate, "yyyy-MM-dd");
-    setBookings((prev) => {
-      const copy = { ...prev };
-      delete copy[key];
-      return copy;
-    });
-    closeModal();
+
+    setSaving(true);
+
+    try {
+      await callCalendarAPI({
+        action: "remove",
+        date: key,
+      });
+
+      await refreshBookings(false);
+
+      setShowModal(false);
+      setSelectedDate(null);
+      setDraftStatus("available");
+      setDraftNote("");
+    } catch (error) {
+      console.error("Remove error:", error);
+      alert("Remove failed: " + error.message);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const selectedKey = selectedDate ? format(selectedDate, "yyyy-MM-dd") : null;
-  const hasExisting = selectedKey && bookings[selectedKey];
+
+  const hasExisting = selectedKey ? Boolean(bookings[selectedKey]) : false;
 
   return (
     <div className="min-h-screen bg-gray-100 flex items-start justify-center p-2 sm:p-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl p-3 sm:p-4">
-        {/* Header */}
+        {/* HEADER */}
+
         <div className="flex items-center justify-between mb-3">
           <button
-            onClick={() => setCurrentDate(subMonths(currentDate, 1))}
+            onClick={() => setCurrentDate((prev) => subMonths(prev, 1))}
             className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500 text-white text-lg active:scale-95"
           >
             ‹
           </button>
+
           <h2 className="text-base sm:text-lg font-bold text-gray-800">
             {format(currentDate, "MMMM yyyy")}
           </h2>
+
           <button
-            onClick={() => setCurrentDate(addMonths(currentDate, 1))}
+            onClick={() => setCurrentDate((prev) => addMonths(prev, 1))}
             className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-500 text-white text-lg active:scale-95"
           >
             ›
           </button>
         </div>
 
-        {/* Legend */}
+        {/* LEGEND */}
+
         <div className="flex items-center justify-center gap-3 mb-2 text-[10px] text-gray-600">
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-red-500" /> Booked
+            <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
+            Booked
           </span>
+
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-orange-500" /> Talks
+            <span className="w-2.5 h-2.5 rounded-full bg-orange-500" />
+            Talks
           </span>
+
           <span className="flex items-center gap-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-green-500" /> Free
+            <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
+            Free
           </span>
         </div>
 
-        {/* Week header */}
+        {/* CONNECTION STATUS */}
+
+        {loading && (
+          <p className="text-center text-xs text-blue-500 mb-2">
+            Loading shared calendar...
+          </p>
+        )}
+
+        {!loading && connectionError && (
+          <div className="text-center text-xs text-red-500 mb-2">
+            Connection error: {connectionError}
+            <button
+              onClick={() => refreshBookings(true)}
+              className="ml-2 underline font-bold"
+            >
+              Retry
+            </button>
+          </div>
+        )}
+
+        {!loading && !connectionError && (
+          <p className="text-center text-[10px] text-green-600 mb-2">
+            ✓ Connected to shared calendar
+          </p>
+        )}
+
+        {/* WEEK HEADER */}
+
         <div className="grid grid-cols-7 gap-1 mb-1">
-          {weekDays.map((d, i) => (
+          {weekDays.map((day, index) => (
             <div
-              key={i}
+              key={index}
               className="text-center text-[10px] font-bold text-gray-400"
             >
-              {d}
+              {day}
             </div>
           ))}
         </div>
 
-        {/* Days */}
+        {/* CALENDAR DAYS */}
+
         <div className="grid grid-cols-7 gap-1">
-          {days.map((day, i) => {
+          {days.map((day, index) => {
             const key = format(day, "yyyy-MM-dd");
+
             const inMonth = day.getMonth() === currentDate.getMonth();
+
             const today = isToday(day);
+
             const booking = bookings[key];
 
             return (
               <button
-                key={i}
+                key={key}
                 onClick={() => openModal(day)}
                 className={`
-                  relative aspect-square rounded-md flex flex-col items-center justify-center
+                  relative aspect-square rounded-md
+                  flex flex-col items-center justify-center
                   transition-all active:scale-95
                   ${inMonth ? getColorClass(key) : "bg-gray-50 text-gray-300"}
                   ${today ? "ring-2 ring-blue-600 ring-offset-1" : ""}
@@ -542,14 +654,16 @@ const Calendar = () => {
                   {format(day, "d")}
                 </span>
 
-                {/* ✅ Saved note preview on cell */}
+                {/* SAVED NOTE PREVIEW */}
+
                 {booking?.note && (
                   <span className="text-[7px] sm:text-[8px] leading-tight px-0.5 mt-0.5 w-full truncate text-center opacity-90">
                     {booking.note}
                   </span>
                 )}
 
-                {/* dot indicator for saved status */}
+                {/* SAVED STATUS DOT */}
+
                 {booking && !booking.note && (
                   <span className="absolute bottom-0.5 w-1 h-1 bg-white rounded-full opacity-80" />
                 )}
@@ -558,14 +672,26 @@ const Calendar = () => {
           })}
         </div>
 
-        {/* Total count */}
+        {/* TOTAL COUNT */}
+
         <p className="text-center text-[11px] text-gray-400 mt-3">
           {Object.keys(bookings).length} saved entr
           {Object.keys(bookings).length === 1 ? "y" : "ies"}
         </p>
+
+        {/* MANUAL REFRESH */}
+
+        <button
+          onClick={() => refreshBookings(true)}
+          disabled={loading || saving}
+          className="w-full mt-2 text-[11px] text-blue-600 font-semibold py-2 disabled:opacity-50"
+        >
+          ↻ Refresh Shared Calendar
+        </button>
       </div>
 
-      {/* ✅ MODAL */}
+      {/* MODAL */}
+
       {showModal && selectedDate && (
         <div
           className="fixed inset-0 bg-black/60 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4"
@@ -573,27 +699,33 @@ const Calendar = () => {
         >
           <div
             className="bg-white w-full sm:max-w-sm rounded-t-2xl sm:rounded-2xl p-4 max-h-[90vh] overflow-y-auto animate-slideUp"
-            onClick={(e) => e.stopPropagation()}
+            onClick={(event) => event.stopPropagation()}
           >
-            {/* Header */}
+            {/* MODAL HEADER */}
+
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold text-gray-800">
                 {format(selectedDate, "EEE, dd MMM yyyy")}
               </h3>
+
               <button
                 onClick={closeModal}
+                disabled={saving}
                 className="w-7 h-7 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 text-lg"
               >
                 ×
               </button>
             </div>
 
-            {/* Status buttons */}
+            {/* STATUS */}
+
             <p className="text-[11px] font-semibold text-gray-500 mb-1">
               STATUS
             </p>
+
             <div className="grid grid-cols-3 gap-2 mb-3">
               <button
+                disabled={saving}
                 onClick={() => setDraftStatus("booked")}
                 className={`py-2 rounded-lg text-[11px] font-bold transition-all ${
                   draftStatus === "booked"
@@ -603,7 +735,9 @@ const Calendar = () => {
               >
                 🔴 Booked
               </button>
+
               <button
+                disabled={saving}
                 onClick={() => setDraftStatus("in_talks")}
                 className={`py-2 rounded-lg text-[11px] font-bold transition-all ${
                   draftStatus === "in_talks"
@@ -613,7 +747,9 @@ const Calendar = () => {
               >
                 🟠 Talks
               </button>
+
               <button
+                disabled={saving}
                 onClick={() => setDraftStatus("available")}
                 className={`py-2 rounded-lg text-[11px] font-bold transition-all ${
                   draftStatus === "available"
@@ -625,28 +761,36 @@ const Calendar = () => {
               </button>
             </div>
 
-            {/* Note input */}
+            {/* NOTE */}
+
             <p className="text-[11px] font-semibold text-gray-500 mb-1">NOTE</p>
+
             <textarea
               value={draftNote}
-              onChange={(e) => setDraftNote(e.target.value)}
+              onChange={(event) => setDraftNote(event.target.value)}
               placeholder="Write note..."
               rows={3}
+              maxLength={5000}
+              disabled={saving}
               className="w-full p-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none mb-3"
             />
 
-            {/* Action buttons */}
+            {/* ACTION BUTTONS */}
+
             <div className="flex gap-2">
               <button
                 onClick={handleSave}
-                className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg active:scale-95"
+                disabled={saving}
+                className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg active:scale-95 disabled:opacity-50"
               >
-                💾 Save
+                {saving ? "Saving..." : "💾 Save"}
               </button>
+
               {hasExisting && (
                 <button
                   onClick={handleRemove}
-                  className="py-2.5 px-4 bg-red-100 text-red-600 text-sm font-bold rounded-lg active:scale-95"
+                  disabled={saving}
+                  className="py-2.5 px-4 bg-red-100 text-red-600 text-sm font-bold rounded-lg active:scale-95 disabled:opacity-50"
                 >
                   🗑 Remove
                 </button>
@@ -654,18 +798,29 @@ const Calendar = () => {
             </div>
 
             <p className="text-[10px] text-gray-400 text-center mt-2">
-              Data saved permanently. Remove only when you click Remove.
+              Data is saved in Google Sheets and shared with all users.
             </p>
           </div>
         </div>
       )}
 
+      {/* ANIMATION */}
+
       <style>{`
         @keyframes slideUp {
-          from { transform: translateY(40px); opacity: 0; }
-          to { transform: translateY(0); opacity: 1; }
+          from {
+            transform: translateY(40px);
+            opacity: 0;
+          }
+          to {
+            transform: translateY(0);
+            opacity: 1;
+          }
         }
-        .animate-slideUp { animation: slideUp 0.25s ease-out; }
+
+        .animate-slideUp {
+          animation: slideUp 0.25s ease-out;
+        }
       `}</style>
     </div>
   );
